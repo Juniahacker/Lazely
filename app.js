@@ -1,7 +1,5 @@
-// app.js — AI WhatsApp Bot (OpenAI SDK v5+)
-const express = require('express');
-const axios = require('axios');
-const OpenAI = require('openai');
+const express = require("express");
+const axios = require("axios");
 
 const app = express();
 app.use(express.json());
@@ -9,75 +7,95 @@ app.use(express.json());
 const port = process.env.PORT || 3000;
 const verifyToken = process.env.VERIFY_TOKEN;
 
-// ✅ OpenAI setup (v5+)
-const openai = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY,
+// ✅ Homepage
+app.get("/", (req, res) => {
+  res.send("Server is running ✅");
 });
 
-// ✅ Homepage — confirm server is alive
-app.get('/', (req, res) => {
-  res.send('Server is running ✅');
-});
+// ✅ Webhook verification (Meta)
+app.get("/webhook", (req, res) => {
+  const mode = req.query["hub.mode"];
+  const token = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
 
-// ✅ Webhook verification
-app.get('/webhook', (req, res) => {
-  const mode = req.query['hub.mode'];
-  const token = req.query['hub.verify_token'];
-  const challenge = req.query['hub.challenge'];
-
-  if (mode === 'subscribe' && token === verifyToken) {
-    console.log('WEBHOOK VERIFIED');
+  if (mode === "subscribe" && token === verifyToken) {
+    console.log("WEBHOOK VERIFIED");
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
   }
 });
 
-// ✅ Receive & auto-reply to any WhatsApp message
-app.post('/webhook', async (req, res) => {
+// 🔥 AI FUNCTION (YOU.com)
+async function getAIReply(userText) {
+  try {
+    const response = await axios.post(
+      "https://api.ydc-index.io/chat",
+      {
+        query: userText,
+        chat_mode: "chat",
+        search_mode: "default"
+      },
+      {
+        headers: {
+          "X-API-Key": process.env.YOU_API_KEY,
+          "Content-Type": "application/json"
+        }
+      }
+    );
+
+    // YOU.com response extraction (safe fallback included)
+    const reply =
+      response.data?.answer ||
+      response.data?.output ||
+      response.data?.message ||
+      "I couldn't think of a response.";
+
+    return reply;
+  } catch (error) {
+    console.error("YOU API ERROR:", error.response?.data || error.message);
+    return "AI service error ❌";
+  }
+}
+
+// 📩 WhatsApp webhook
+app.post("/webhook", async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
     const changes = entry?.changes?.[0];
     const message = changes?.value?.messages?.[0];
 
     if (message) {
-      const from = message.from; // User number
+      const from = message.from;
       const userText = message.text?.body || "";
 
       console.log("User:", from);
       console.log("Message:", userText);
 
-      // 🔹 Generate AI reply via OpenAI
-      const aiResponse = await openai.chat.completions.create({
-        model: "gpt-3.5-turbo",
-        messages: [{ role: "user", content: userText }],
-      });
-
-      const botReply = aiResponse.choices[0].message.content;
+      // 🤖 Get AI reply from YOU.com
+      const botReply = await getAIReply(userText);
       console.log("AI Reply:", botReply);
 
-      // 🔹 Send reply via WhatsApp
-      const response = await axios.post(
+      // 📤 Send WhatsApp reply
+      await axios.post(
         `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
         {
           messaging_product: "whatsapp",
           to: from,
-          text: { body: botReply },
+          text: { body: botReply }
         },
         {
           headers: {
             Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-            "Content-Type": "application/json",
-          },
+            "Content-Type": "application/json"
+          }
         }
       );
-
-      console.log("Reply sent:", response.data);
     }
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Error in /webhook:", error.response?.data || error.message);
+    console.error("Webhook Error:", error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
