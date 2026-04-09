@@ -36,22 +36,28 @@ app.get("/webhook", (req, res) => {
 async function getAIReply(userText) {
   try {
     const response = await axios.post(
-      "https://router.huggingface.co/models/microsoft/DialoGPT-medium",
-      { inputs: userText },
+      "https://api-inference.huggingface.co/models/gpt2",
+      {
+        inputs: userText
+      },
       {
         headers: {
           Authorization: `Bearer ${process.env.HF_API_KEY}`,
-          "Content-Type": "application/json",
-        },
+          "Content-Type": "application/json"
+        }
       }
     );
 
-    return (
-      response.data?.generated_text ||
+    // GPT2 returns array sometimes
+    const output =
       response.data?.[0]?.generated_text ||
-      response.data?.[0]?.generated_text?.trim() ||
-      "I couldn't understand that 😅"
-    );
+      response.data?.generated_text ||
+      response.data;
+
+    if (typeof output === "string") return output;
+    if (Array.isArray(output)) return output[0]?.generated_text;
+
+    return "I couldn't respond 😅";
   } catch (error) {
     console.error("HF ERROR:", error.response?.data || error.message);
     return "AI service error ❌";
