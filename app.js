@@ -1,5 +1,7 @@
+// app.js — AI WhatsApp Bot
 const express = require('express');
 const axios = require('axios');
+const { Configuration, OpenAIApi } = require('openai');
 
 const app = express();
 app.use(express.json());
@@ -7,12 +9,18 @@ app.use(express.json());
 const port = process.env.PORT || 3000;
 const verifyToken = process.env.VERIFY_TOKEN;
 
-// ✅ Homepage (confirm server is alive)
+// ✅ OpenAI setup
+const configuration = new Configuration({
+  apiKey: process.env.OPENAI_API_KEY,
+});
+const openai = new OpenAIApi(configuration);
+
+// ✅ Homepage — confirm server is alive
 app.get('/', (req, res) => {
   res.send('Server is running ✅');
 });
 
-// ✅ Webhook verification (Meta will call this)
+// ✅ Webhook verification
 app.get('/webhook', (req, res) => {
   const mode = req.query['hub.mode'];
   const token = req.query['hub.verify_token'];
@@ -26,7 +34,7 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ✅ Receive & auto-reply to any message
+// ✅ Receive & auto-reply to any message with AI
 app.post('/webhook', async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
@@ -35,20 +43,27 @@ app.post('/webhook', async (req, res) => {
 
     if (message) {
       const from = message.from; // user's number
-      const text = message.text?.body || "";
+      const userText = message.text?.body || "";
 
       console.log("User:", from);
-      console.log("Message:", text);
+      console.log("Message:", userText);
 
-      // 🔥 Send automatic reply
+      // 🔹 Generate AI reply
+      const aiResponse = await openai.createChatCompletion({
+        model: "gpt-3.5-turbo",
+        messages: [{ role: "user", content: userText }],
+      });
+
+      const botReply = aiResponse.data.choices[0].message.content;
+      console.log("AI Reply:", botReply);
+
+      // 🔹 Send reply via WhatsApp
       const response = await axios.post(
         `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
         {
           messaging_product: "whatsapp",
           to: from,
-          text: {
-            body: `Hey 👋, you said: "${text}"`
-          }
+          text: { body: botReply }
         },
         {
           headers: {
@@ -63,7 +78,7 @@ app.post('/webhook', async (req, res) => {
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Error sending reply:", error.response?.data || error.message);
+    console.error("Error in /webhook:", error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
