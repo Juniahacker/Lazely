@@ -1,7 +1,7 @@
-// app.js — AI WhatsApp Bot
+// app.js — AI WhatsApp Bot (OpenAI SDK v5+)
 const express = require('express');
 const axios = require('axios');
-const { Configuration, OpenAIApi } = require('openai');
+const OpenAI = require('openai');
 
 const app = express();
 app.use(express.json());
@@ -9,11 +9,10 @@ app.use(express.json());
 const port = process.env.PORT || 3000;
 const verifyToken = process.env.VERIFY_TOKEN;
 
-// ✅ OpenAI setup
-const configuration = new Configuration({
+// ✅ OpenAI setup (v5+)
+const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY,
 });
-const openai = new OpenAIApi(configuration);
 
 // ✅ Homepage — confirm server is alive
 app.get('/', (req, res) => {
@@ -34,7 +33,7 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ✅ Receive & auto-reply to any message with AI
+// ✅ Receive & auto-reply to any WhatsApp message
 app.post('/webhook', async (req, res) => {
   try {
     const entry = req.body.entry?.[0];
@@ -42,19 +41,19 @@ app.post('/webhook', async (req, res) => {
     const message = changes?.value?.messages?.[0];
 
     if (message) {
-      const from = message.from; // user's number
+      const from = message.from; // User number
       const userText = message.text?.body || "";
 
       console.log("User:", from);
       console.log("Message:", userText);
 
-      // 🔹 Generate AI reply
-      const aiResponse = await openai.createChatCompletion({
+      // 🔹 Generate AI reply via OpenAI
+      const aiResponse = await openai.chat.completions.create({
         model: "gpt-3.5-turbo",
         messages: [{ role: "user", content: userText }],
       });
 
-      const botReply = aiResponse.data.choices[0].message.content;
+      const botReply = aiResponse.choices[0].message.content;
       console.log("AI Reply:", botReply);
 
       // 🔹 Send reply via WhatsApp
@@ -63,13 +62,13 @@ app.post('/webhook', async (req, res) => {
         {
           messaging_product: "whatsapp",
           to: from,
-          text: { body: botReply }
+          text: { body: botReply },
         },
         {
           headers: {
             Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-            "Content-Type": "application/json"
-          }
+            "Content-Type": "application/json",
+          },
         }
       );
 
