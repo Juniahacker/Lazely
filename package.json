@@ -1,5 +1,5 @@
 {
-  "name": "lazely",
+  "name": "lazely-ai-bot",
   "version": "1.0.0",
   "main": "app.js",
   "scripts": {
@@ -7,7 +7,6 @@
   },
   "dependencies": {
     "express": "^4.18.2",
-    "axios": "^1.7.2",
-    "openai": "^5.0.0"
+    "axios": "^1.7.2"
   }
 }
