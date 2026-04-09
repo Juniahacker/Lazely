@@ -7,7 +7,7 @@ app.use(express.json());
 const port = process.env.PORT || 3000;
 const verifyToken = process.env.VERIFY_TOKEN;
 
-// ✅ Homepage (just to confirm server is alive)
+// ✅ Homepage (confirm server is alive)
 app.get('/', (req, res) => {
   res.send('Server is running ✅');
 });
@@ -26,26 +26,22 @@ app.get('/webhook', (req, res) => {
   }
 });
 
-// ✅ Receive + Reply to WhatsApp messages
+// ✅ Receive & auto-reply to any message
 app.post('/webhook', async (req, res) => {
   try {
-    const timestamp = new Date().toISOString();
-    console.log(`Webhook received at ${timestamp}`);
-    console.log(JSON.stringify(req.body, null, 2));
-
     const entry = req.body.entry?.[0];
     const changes = entry?.changes?.[0];
     const message = changes?.value?.messages?.[0];
 
     if (message) {
-      const from = message.from;
-      const text = message.text?.body;
+      const from = message.from; // user's number
+      const text = message.text?.body || "";
 
       console.log("User:", from);
       console.log("Message:", text);
 
-      // 🔥 SEND REPLY
-      await axios.post(
+      // 🔥 Send automatic reply
+      const response = await axios.post(
         `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
         {
           messaging_product: "whatsapp",
@@ -61,11 +57,13 @@ app.post('/webhook', async (req, res) => {
           }
         }
       );
+
+      console.log("Reply sent:", response.data);
     }
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("Error:", error.response?.data || error.message);
+    console.error("Error sending reply:", error.response?.data || error.message);
     res.sendStatus(500);
   }
 });
