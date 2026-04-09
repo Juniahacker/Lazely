@@ -36,7 +36,7 @@ app.get("/webhook", (req, res) => {
 async function getAIReply(userText) {
   try {
     const response = await axios.post(
-      "https://router.huggingface.co/",
+      "https://router.huggingface.co/models/microsoft/DialoGPT-medium",
       { inputs: userText },
       {
         headers: {
@@ -49,6 +49,7 @@ async function getAIReply(userText) {
     return (
       response.data?.generated_text ||
       response.data?.[0]?.generated_text ||
+      response.data?.[0]?.generated_text?.trim() ||
       "I couldn't understand that 😅"
     );
   } catch (error) {
@@ -56,7 +57,6 @@ async function getAIReply(userText) {
     return "AI service error ❌";
   }
 }
-
 /* =========================
    WEBHOOK RECEIVER
 ========================= */
