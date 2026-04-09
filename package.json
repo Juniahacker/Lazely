@@ -1,17 +1,13 @@
-
 {
-  "name": "lazely-bot",
+  "name": "lazely",
   "version": "1.0.0",
-  "description": "WhatsApp bot",
   "main": "app.js",
   "scripts": {
     "start": "node app.js"
   },
   "dependencies": {
     "express": "^4.18.2",
-    "axios": "^1.6.0"
-  },
-  "engines": {
-    "node": ">=18"
+    "axios": "^1.7.2",
+    "openai": "^4.28.0"
   }
 }
