@@ -36,7 +36,7 @@ app.get("/webhook", (req, res) => {
 async function getAIReply(userText) {
   try {
     const response = await axios.post(
-      "https://api-inference.huggingface.co/models/facebook/blenderbot-400M-distill",
+      "https://router.huggingface.co/",
       { inputs: userText },
       {
         headers: {
