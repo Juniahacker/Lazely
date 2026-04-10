@@ -17,6 +17,11 @@ admin.initializeApp({
 });
 
 const db = admin.firestore();
+await db.collection("test").add({
+  message: "Firebase is working 🚀",
+  time: new Date()
+});
+console.log("✅ Firebase connected");
 
 /* ---------------- WHATSAPP CONFIG ---------------- */
 const TOKEN = "YOUR_WHATSAPP_TOKEN";
