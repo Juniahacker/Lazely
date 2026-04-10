@@ -1,117 +1,110 @@
-
-const express = require("express");
-const axios = require("axios");
-const OpenAI = require("openai");
+import express from "express";
+import bodyParser from "body-parser";
+import fetch from "node-fetch";
+import admin from "firebase-admin";
+import fs from "fs";
 
 const app = express();
-app.use(express.json());
+app.use(bodyParser.json());
 
-const port = process.env.PORT || 3000;
+/* ---------------- FIREBASE SETUP ---------------- */
+const serviceAccount = JSON.parse(
+  fs.readFileSync("./serviceAccountKey.json", "utf-8")
+);
 
-// ENV VARIABLES
-const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
-const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
-const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
-const HF_TOKEN = process.env.HF_TOKEN;
-
-// ✅ Hugging Face (OpenAI-compatible)
-const client = new OpenAI({
-  baseURL: "https://router.huggingface.co/v1",
-  apiKey: HF_TOKEN,
+admin.initializeApp({
+  credential: admin.credential.cert(serviceAccount),
 });
 
-// ✅ Test route
-app.get("/", (req, res) => {
-  res.send("Server running ✅");
+const db = admin.firestore();
+
+/* ---------------- WHATSAPP CONFIG ---------------- */
+const TOKEN = "YOUR_WHATSAPP_TOKEN";
+const PHONE_NUMBER_ID = "YOUR_PHONE_NUMBER_ID";
+const VERIFY_TOKEN = "jh_verify_token";
+
+/* ---------------- SAVE FUNCTIONS ---------------- */
+async function saveUser(phone) {
+  await db.collection("users").doc(phone).set({
+    phone,
+    lastSeen: new Date()
+  }, { merge: true });
+}
+
+async function saveMessage(phone, message, fromMe) {
+  await db.collection("messages").add({
+    phone,
+    message,
+    fromMe,
+    timestamp: new Date()
+  });
+}
+
+/* ---------------- BOT LOGIC ---------------- */
+function getReply(text) {
+  text = text.toLowerCase();
+
+  if (text.includes("hello")) return "👋 Hey! Welcome to JH Codes.";
+  if (text.includes("services")) return "We offer Apps, AI Bots & Digital Marketing 🚀";
+  if (text.includes("price")) return "💰 Pricing depends on your needs. Contact us!";
+  if (text.includes("bot")) return "🤖 We build WhatsApp automation bots like this one!";
+
+  return "🤖 I didn’t understand that. Type 'services' to explore.";
+}
+
+/* ---------------- WEBHOOK (RECEIVE) ---------------- */
+app.post("/webhook", async (req, res) => {
+  try {
+    const entry = req.body.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const message = changes?.value?.messages?.[0];
+
+    if (message) {
+      const from = message.from;
+      const text = message.text?.body;
+
+      await saveUser(from);
+      await saveMessage(from, text, false);
+
+      const reply = getReply(text);
+
+      await fetch(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${TOKEN}`,
+          "Content-Type": "application/json"
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to: from,
+          text: { body: reply }
+        })
+      });
+
+      await saveMessage(from, reply, true);
+    }
+
+    res.sendStatus(200);
+  } catch (err) {
+    console.error(err);
+    res.sendStatus(500);
+  }
 });
 
-// ✅ Webhook verification
+/* ---------------- WEBHOOK VERIFY ---------------- */
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === VERIFY_TOKEN) {
-    console.log("Webhook verified ✅");
+  if (mode && token === VERIFY_TOKEN) {
     res.status(200).send(challenge);
   } else {
     res.sendStatus(403);
   }
 });
 
-// ✅ AI FUNCTION (NEW HF ROUTER)
-async function getAIReply(userText) {
-  try {
-    const completion = await client.chat.completions.create({
-      model: "moonshotai/Kimi-K2-Instruct-0905",
-      messages: [
-        {
-          role: "user",
-          content: userText,
-        },
-      ],
-    });
-
-    return completion.choices[0].message.content;
-  } catch (error) {
-    console.error("HF ROUTER ERROR:", error.message);
-    return "AI service error ❌";
-  }
-}
-
-// ✅ Send WhatsApp message
-async function sendMessage(to, text) {
-  try {
-    await axios.post(
-      `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
-      {
-        messaging_product: "whatsapp",
-        to: to,
-        text: { body: text },
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
-          "Content-Type": "application/json",
-        },
-      }
-    );
-
-    console.log("Reply sent:", text);
-  } catch (error) {
-    console.error("Send Error:", error.response?.data || error.message);
-  }
-}
-
-// ✅ Webhook (receive + reply)
-app.post("/webhook", async (req, res) => {
-  try {
-    const body = req.body;
-
-    const message =
-      body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
-
-    if (message) {
-      const from = message.from;
-      const text = message.text?.body;
-
-      console.log("User:", from);
-      console.log("Message:", text);
-
-      const aiReply = await getAIReply(text);
-
-      console.log("AI Reply:", aiReply);
-
-      await sendMessage(from, aiReply);
-    }
-
-    res.sendStatus(200);
-  } catch (error) {
-    console.error("Webhook Error:", error);
-    res.sendStatus(500);
-  }
-});
-
-app.listen(port, () => {
-  console.log(`Server running on port ${port}`);
+/* ---------------- START SERVER ---------------- */
+app.listen(3000, () => {
+  console.log("🚀 JH Codes Bot running on port 3000");
 });
