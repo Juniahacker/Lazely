@@ -8,9 +8,7 @@ const app = express();
 app.use(bodyParser.json());
 
 /* ---------------- FIREBASE SETUP ---------------- */
-const serviceAccount = JSON.parse(
-  fs.readFileSync("./serviceAccountKey.json", "utf-8")
-);
+const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
