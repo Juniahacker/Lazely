@@ -8,7 +8,7 @@ app.use(bodyParser.json());
 
 // 🔥 FIREBASE INIT
 //import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
-
+import fs from "fs";
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
