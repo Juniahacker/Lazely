@@ -1,116 +1,116 @@
 const express = require("express");
 const axios = require("axios");
+const OpenAI = require("openai");
 
 const app = express();
 app.use(express.json());
 
 const port = process.env.PORT || 3000;
-const verifyToken = process.env.VERIFY_TOKEN;
 
-/* =========================
-   HOME ROUTE
-========================= */
-app.get("/", (req, res) => {
-  res.send("Lazely AI Bot (Hugging Face) is running ✅");
+// ENV VARIABLES
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+const HF_TOKEN = process.env.HF_TOKEN;
+
+// ✅ Hugging Face (OpenAI-compatible)
+const client = new OpenAI({
+  baseURL: "https://router.huggingface.co/v1",
+  apiKey: HF_TOKEN,
 });
 
-/* =========================
-   WEBHOOK VERIFY (Meta)
-========================= */
+// ✅ Test route
+app.get("/", (req, res) => {
+  res.send("Server running ✅");
+});
+
+// ✅ Webhook verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode === "subscribe" && token === verifyToken) {
-    console.log("WEBHOOK VERIFIED");
-    return res.status(200).send(challenge);
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("Webhook verified ✅");
+    res.status(200).send(challenge);
+  } else {
+    res.sendStatus(403);
   }
-
-  res.sendStatus(403);
 });
 
-/* =========================
-   HUGGING FACE AI FUNCTION
-========================= */
+// ✅ AI FUNCTION (NEW HF ROUTER)
 async function getAIReply(userText) {
   try {
-    const response = await axios.post(
-      "https://api-inference.huggingface.co/models/gpt2",
-      {
-        inputs: userText
-      },
-      {
-        headers: {
-          Authorization: `Bearer ${process.env.HF_API_KEY}`,
-          "Content-Type": "application/json"
-        }
-      }
-    );
+    const completion = await client.chat.completions.create({
+      model: "moonshotai/Kimi-K2-Instruct-0905",
+      messages: [
+        {
+          role: "user",
+          content: userText,
+        },
+      ],
+    });
 
-    // GPT2 returns array sometimes
-    const output =
-      response.data?.[0]?.generated_text ||
-      response.data?.generated_text ||
-      response.data;
-
-    if (typeof output === "string") return output;
-    if (Array.isArray(output)) return output[0]?.generated_text;
-
-    return "I couldn't respond 😅";
+    return completion.choices[0].message.content;
   } catch (error) {
-    console.error("HF ERROR:", error.response?.data || error.message);
+    console.error("HF ROUTER ERROR:", error.message);
     return "AI service error ❌";
   }
 }
-/* =========================
-   WEBHOOK RECEIVER
-========================= */
+
+// ✅ Send WhatsApp message
+async function sendMessage(to, text) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to: to,
+        text: { body: text },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Reply sent:", text);
+  } catch (error) {
+    console.error("Send Error:", error.response?.data || error.message);
+  }
+}
+
+// ✅ Webhook (receive + reply)
 app.post("/webhook", async (req, res) => {
   try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
+    const body = req.body;
+
+    const message =
+      body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
 
     if (message) {
       const from = message.from;
-      const userText = message.text?.body || "";
+      const text = message.text?.body;
 
       console.log("User:", from);
-      console.log("Message:", userText);
+      console.log("Message:", text);
 
-      // 🤖 AI response
-      const botReply = await getAIReply(userText);
+      const aiReply = await getAIReply(text);
 
-      // 📤 Send WhatsApp reply
-      await axios.post(
-        `https://graph.facebook.com/v19.0/${process.env.PHONE_NUMBER_ID}/messages`,
-        {
-          messaging_product: "whatsapp",
-          to: from,
-          text: { body: botReply },
-        },
-        {
-          headers: {
-            Authorization: `Bearer ${process.env.WHATSAPP_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-        }
-      );
+      console.log("AI Reply:", aiReply);
 
-      console.log("Reply sent:", botReply);
+      await sendMessage(from, aiReply);
     }
 
     res.sendStatus(200);
   } catch (error) {
-    console.error("WEBHOOK ERROR:", error.response?.data || error.message);
+    console.error("Webhook Error:", error);
     res.sendStatus(500);
   }
 });
 
-/* =========================
-   START SERVER
-========================= */
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
