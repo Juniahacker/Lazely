@@ -13,18 +13,21 @@ const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
 const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
 const HF_TOKEN = process.env.HF_TOKEN;
 
-// ✅ Hugging Face (OpenAI-compatible)
+// ✅ Hugging Face Router (OpenAI compatible)
 const client = new OpenAI({
   baseURL: "https://router.huggingface.co/v1",
   apiKey: HF_TOKEN,
 });
 
-// ✅ Test route
+// ✅ MEMORY STORE
+const userSessions = {};
+
+// ✅ Homepage
 app.get("/", (req, res) => {
-  res.send("Server running ✅");
+  res.send("Lazely AI Bot Running ✅");
 });
 
-// ✅ Webhook verification
+// ✅ Webhook Verification
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
@@ -38,27 +41,38 @@ app.get("/webhook", (req, res) => {
   }
 });
 
-// ✅ AI FUNCTION (NEW HF ROUTER)
-async function getAIReply(userText) {
+// ✅ AI FUNCTION WITH MEMORY
+async function getAIReply(userText, userId) {
   try {
-    const completion = await client.chat.completions.create({
-      model: "moonshotai/Kimi-K2-Instruct-0905",
-      messages: [
-        {
-          role: "user",
-          content: userText,
-        },
-      ],
+    if (!userSessions[userId]) {
+      userSessions[userId] = [];
+    }
+
+    userSessions[userId].push({
+      role: "user",
+      content: userText,
     });
 
-    return completion.choices[0].message.content;
+    const completion = await client.chat.completions.create({
+      model: "mistralai/Mistral-7B-Instruct-v0.2",
+      messages: userSessions[userId],
+    });
+
+    const reply = completion.choices[0].message.content;
+
+    userSessions[userId].push({
+      role: "assistant",
+      content: reply,
+    });
+
+    return `🤖 Lazely AI:\n\n${reply}`;
   } catch (error) {
-    console.error("HF ROUTER ERROR:", error.message);
+    console.error("AI ERROR:", error.message);
     return "AI service error ❌";
   }
 }
 
-// ✅ Send WhatsApp message
+// ✅ SEND WHATSAPP MESSAGE
 async function sendMessage(to, text) {
   try {
     await axios.post(
@@ -82,7 +96,7 @@ async function sendMessage(to, text) {
   }
 }
 
-// ✅ Webhook (receive + reply)
+// ✅ MAIN WEBHOOK
 app.post("/webhook", async (req, res) => {
   try {
     const body = req.body;
@@ -92,12 +106,46 @@ app.post("/webhook", async (req, res) => {
 
     if (message) {
       const from = message.from;
-      const text = message.text?.body;
+      const text = message.text?.body?.toLowerCase();
 
       console.log("User:", from);
       console.log("Message:", text);
 
-      const aiReply = await getAIReply(text);
+      // 🔥 MENU SYSTEM
+      if (text === "menu") {
+        await sendMessage(
+          from,
+`👋 Welcome to Lazely AI
+
+1️⃣ Products  
+2️⃣ Support  
+3️⃣ Talk to AI  
+
+Reply with a number.`
+        );
+        return res.sendStatus(200);
+      }
+
+      if (text === "1") {
+        await sendMessage(from, "🛍️ We offer digital tools & AI solutions.");
+        return res.sendStatus(200);
+      }
+
+      if (text === "2") {
+        await sendMessage(from, "📞 Contact support: +256 XXX XXX");
+        return res.sendStatus(200);
+      }
+
+      if (text === "3") {
+        await sendMessage(from, "🤖 You can now chat with AI. Ask anything!");
+        return res.sendStatus(200);
+      }
+
+      // 🔥 HUMAN-LIKE DELAY
+      await new Promise(resolve => setTimeout(resolve, 1500));
+
+      // 🔥 AI RESPONSE
+      const aiReply = await getAIReply(text, from);
 
       console.log("AI Reply:", aiReply);
 
@@ -111,6 +159,7 @@ app.post("/webhook", async (req, res) => {
   }
 });
 
+// ✅ START SERVER
 app.listen(port, () => {
   console.log(`Server running on port ${port}`);
 });
