@@ -7,7 +7,7 @@ const app = express();
 app.use(bodyParser.json());
 
 // 🔥 FIREBASE INIT
-import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
+//import serviceAccount from "./serviceAccountKey.json" assert { type: "json" };
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
