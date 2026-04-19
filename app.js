@@ -1,120 +1,217 @@
-import express from "express";
-import bodyParser from "body-parser";
-import fetch from "node-fetch";
-import admin from "firebase-admin";
-import fs from "fs";
-
-const app = express();
-app.use(bodyParser.json());
-
+const express = require("express");
+const axios = require("axios");
+const OpenAI = require("openai");
 const { createClient } = require("@supabase/supabase-js");
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-);
+const app = express();
+app.use(express.json());
 
-/* ---------------- FIREBASE SETUP ---------------- */
-const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
+const port = process.env.PORT || 3000;
 
-admin.initializeApp({
-  credential: admin.credential.cert(serviceAccount),
+// ENV VARIABLES
+const VERIFY_TOKEN = process.env.VERIFY_TOKEN;
+const WHATSAPP_TOKEN = process.env.WHATSAPP_TOKEN;
+const PHONE_NUMBER_ID = process.env.PHONE_NUMBER_ID;
+const HF_TOKEN = process.env.HF_TOKEN;
+
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_KEY = process.env.SUPABASE_KEY;
+
+// ✅ Supabase client
+const supabase = createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ✅ Hugging Face Router (OpenAI compatible)
+const client = new OpenAI({
+  baseURL: "https://router.huggingface.co/v1",
+  apiKey: HF_TOKEN,
 });
 
-const db = admin.firestore();
-await db.collection("test").add({
-  message: "Firebase is working 🚀",
-  time: new Date()
-});
-console.log("✅ Firebase connected");
-
-/* ---------------- WHATSAPP CONFIG ---------------- */
-const TOKEN = "YOUR_WHATSAPP_TOKEN";
-const PHONE_NUMBER_ID = "YOUR_PHONE_NUMBER_ID";
-const VERIFY_TOKEN = "jh_verify_token";
-
-/* ---------------- SAVE FUNCTIONS ---------------- */
-async function saveUser(phone) {
-  await db.collection("users").doc(phone).set({
-    phone,
-    lastSeen: new Date()
-  }, { merge: true });
-}
-
-async function saveMessage(phone, message, fromMe) {
-  await db.collection("messages").add({
-    phone,
-    message,
-    fromMe,
-    timestamp: new Date()
-  });
-}
-
-/* ---------------- BOT LOGIC ---------------- */
-function getReply(text) {
-  text = text.toLowerCase();
-
-  if (text.includes("hello")) return "👋 Hey! Welcome to JH Codes.";
-  if (text.includes("services")) return "We offer Apps, AI Bots & Digital Marketing 🚀";
-  if (text.includes("price")) return "💰 Pricing depends on your needs. Contact us!";
-  if (text.includes("bot")) return "🤖 We build WhatsApp automation bots like this one!";
-
-  return "🤖 I didn’t understand that. Type 'services' to explore.";
-}
-
-/* ---------------- WEBHOOK (RECEIVE) ---------------- */
-app.post("/webhook", async (req, res) => {
-  try {
-    const entry = req.body.entry?.[0];
-    const changes = entry?.changes?.[0];
-    const message = changes?.value?.messages?.[0];
-
-    if (message) {
-      const from = message.from;
-      const text = message.text?.body;
-
-      await saveUser(from);
-      await saveMessage(from, text, false);
-
-      const reply = getReply(text);
-
-      await fetch(`https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${TOKEN}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify({
-          messaging_product: "whatsapp",
-          to: from,
-          text: { body: reply }
-        })
-      });
-
-      await saveMessage(from, reply, true);
-    }
-
-    res.sendStatus(200);
-  } catch (err) {
-    console.error(err);
-    res.sendStatus(500);
-  }
+/* =========================
+   HOME
+========================= */
+app.get("/", (req, res) => {
+  res.send("Lazely AI Bot + Supabase Running ✅");
 });
 
-/* ---------------- WEBHOOK VERIFY ---------------- */
+/* =========================
+   WEBHOOK VERIFY
+========================= */
 app.get("/webhook", (req, res) => {
   const mode = req.query["hub.mode"];
   const token = req.query["hub.verify_token"];
   const challenge = req.query["hub.challenge"];
 
-  if (mode && token === VERIFY_TOKEN) {
-    res.status(200).send(challenge);
-  } else {
-    res.sendStatus(403);
+  if (mode === "subscribe" && token === VERIFY_TOKEN) {
+    console.log("Webhook verified ✅");
+    return res.status(200).send(challenge);
+  }
+
+  res.sendStatus(403);
+});
+
+/* =========================
+   FETCH CHAT HISTORY (MEMORY)
+========================= */
+async function getChatHistory(phone) {
+  const { data, error } = await supabase
+    .from("messages")
+    .select("role, message")
+    .eq("phone", phone)
+    .order("created_at", { ascending: true })
+    .limit(10);
+
+  if (error) {
+    console.error("History Error:", error.message);
+    return [];
+  }
+
+  return data.map((msg) => ({
+    role: msg.role,
+    content: msg.message,
+  }));
+}
+
+/* =========================
+   AI RESPONSE
+========================= */
+async function getAIReply(userText, phone) {
+  try {
+    const history = await getChatHistory(phone);
+
+    const messages = [
+      ...history,
+      { role: "user", content: userText },
+    ];
+
+    const completion = await client.chat.completions.create({
+      model: "mistralai/Mistral-7B-Instruct-v0.2",
+      messages: messages,
+    });
+
+    return completion.choices[0].message.content;
+  } catch (error) {
+    console.error("AI ERROR:", error.message);
+    return "AI service error ❌";
+  }
+}
+
+/* =========================
+   SAVE MESSAGE
+========================= */
+async function saveMessage(phone, message, role) {
+  const { error } = await supabase.from("messages").insert([
+    {
+      phone,
+      message,
+      role,
+    },
+  ]);
+
+  if (error) {
+    console.error("Save Error:", error.message);
+  }
+}
+
+/* =========================
+   SEND WHATSAPP MESSAGE
+========================= */
+async function sendMessage(to, text) {
+  try {
+    await axios.post(
+      `https://graph.facebook.com/v18.0/${PHONE_NUMBER_ID}/messages`,
+      {
+        messaging_product: "whatsapp",
+        to: to,
+        text: { body: text },
+      },
+      {
+        headers: {
+          Authorization: `Bearer ${WHATSAPP_TOKEN}`,
+          "Content-Type": "application/json",
+        },
+      }
+    );
+
+    console.log("Reply sent:", text);
+  } catch (error) {
+    console.error("Send Error:", error.response?.data || error.message);
+  }
+}
+
+/* =========================
+   MAIN WEBHOOK
+========================= */
+app.post("/webhook", async (req, res) => {
+  try {
+    const body = req.body;
+
+    const message =
+      body.entry?.[0]?.changes?.[0]?.value?.messages?.[0];
+
+    if (message) {
+      const from = message.from;
+      const text = message.text?.body?.toLowerCase();
+
+      console.log("User:", from);
+      console.log("Message:", text);
+
+      // 🔥 SAVE USER MESSAGE
+      await saveMessage(from, text, "user");
+
+      // 🔥 MENU SYSTEM
+      if (text === "menu") {
+        const menu = `👋 Welcome to Lazely AI
+
+1️⃣ Products  
+2️⃣ Support  
+3️⃣ Talk to AI  
+
+Reply with a number.`;
+
+        await sendMessage(from, menu);
+        return res.sendStatus(200);
+      }
+
+      if (text === "1") {
+        await sendMessage(from, "🛍️ We offer AI tools and automation.");
+        return res.sendStatus(200);
+      }
+
+      if (text === "2") {
+        await sendMessage(from, "📞 Contact support: +256 XXX XXX");
+        return res.sendStatus(200);
+      }
+
+      if (text === "3") {
+        await sendMessage(from, "🤖 AI activated. Ask anything!");
+        return res.sendStatus(200);
+      }
+
+      // ⏳ Human-like delay
+      await new Promise((resolve) => setTimeout(resolve, 1200));
+
+      // 🤖 AI RESPONSE
+      const aiReply = await getAIReply(text, from);
+
+      console.log("AI Reply:", aiReply);
+
+      // 🔥 SAVE AI MESSAGE
+      await saveMessage(from, aiReply, "assistant");
+
+      // 📤 SEND REPLY
+      await sendMessage(from, `🤖 Lazely AI:\n\n${aiReply}`);
+    }
+
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("Webhook Error:", error);
+    res.sendStatus(500);
   }
 });
 
-/* ---------------- START SERVER ---------------- */
-app.listen(3000, () => {
-  console.log("🚀 JH Codes Bot running on port 3000");
+/* =========================
+   START SERVER
+========================= */
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
