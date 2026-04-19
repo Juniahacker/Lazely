@@ -7,6 +7,13 @@ import fs from "fs";
 const app = express();
 app.use(bodyParser.json());
 
+const { createClient } = require("@supabase/supabase-js");
+
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_KEY
+);
+
 /* ---------------- FIREBASE SETUP ---------------- */
 const serviceAccount = JSON.parse(process.env.FIREBASE_KEY);
 
